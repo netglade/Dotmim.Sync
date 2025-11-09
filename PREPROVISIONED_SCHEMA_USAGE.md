@@ -37,7 +37,22 @@ Before running your client application, you must create all required database ob
 - Stored procedures
 - Scope info tables (scope_info and scope_info_client)
 
-You can generate the SQL scripts using the server-side orchestrator (see Script Generation section below).
+**⭐ You can generate these scripts automatically!**
+
+See [SCRIPT_GENERATION_USAGE.md](SCRIPT_GENERATION_USAGE.md) for detailed instructions on using `GetProvisioningScriptsAsync()` to generate migration SQL files from your server setup.
+
+**Quick example:**
+```csharp
+var remoteOrchestrator = new RemoteOrchestrator(serverProvider);
+var setup = new SyncSetup("ProductCategory", "Product");
+// ... configure filters ...
+
+// Generate migration SQL
+var scripts = await remoteOrchestrator.GetProvisioningScriptsAsync(setup);
+await File.WriteAllTextAsync("client_migration.sql", scripts);
+```
+
+Then apply the generated SQL file to your client database before deploying the application.
 
 ### Step 3: Configure Client Synchronization
 
@@ -293,9 +308,19 @@ The validation script will report:
    - Get server scope info via `GetScopeInfoAsync()`
 
 2. **Generate Client Scripts:**
-   - Temporarily provision a test client database with full permissions
-   - Script out all created objects (tracking tables, triggers, stored procedures)
+   - Use `GetProvisioningScriptsAsync()` to automatically generate migration SQL
+   - See [SCRIPT_GENERATION_USAGE.md](SCRIPT_GENERATION_USAGE.md) for detailed instructions
    - Save scripts to version control
+
+   **Example:**
+   ```csharp
+   var serverScope = await remoteOrchestrator.GetScopeInfoAsync();
+   var localOrchestrator = new LocalOrchestrator(clientProvider);
+   await localOrchestrator.SaveProvisioningScriptsAsync(
+       "Migrations/001_Client.sql",
+       serverScopeInfo: serverScope
+   );
+   ```
 
 3. **Client Deployment:**
    - Apply migration scripts to client database
@@ -319,9 +344,8 @@ The validation script will report:
 
 ## Limitations and Important Warnings
 
-⚠️ **Manual Script Generation:** For now, you must manually generate and maintain client migration scripts
-⚠️ **Schema Synchronization:** You must ensure client schema matches server schema
-⚠️ **No Auto-Migration:** Schema changes on the server require manual updates to client migration scripts
+⚠️ **Schema Synchronization:** You must ensure client schema matches server schema (regenerate scripts when server changes)
+⚠️ **No Auto-Migration:** Schema changes on the server require regenerating and redeploying client migration scripts
 ⚠️ **No Runtime Validation:** Dotmim.Sync does NOT check if objects exist before sync - it will fail with SQL exceptions
 ⚠️ **Critical: Missing Triggers = Silent Data Loss:** If triggers are missing, changes won't be tracked but sync won't fail!
 
@@ -331,13 +355,14 @@ The validation script will report:
 - Complete list of failure scenarios
 - Detailed validation recommendations
 
+## Related Documentation
+
+- **[SCRIPT_GENERATION_USAGE.md](SCRIPT_GENERATION_USAGE.md)** - Complete guide to automatic SQL script generation
+- **[PREPROVISIONED_TECHNICAL_DETAILS.md](PREPROVISIONED_TECHNICAL_DETAILS.md)** - Technical deep dive
+- **[WEB_SCENARIO_ANALYSIS.md](WEB_SCENARIO_ANALYSIS.md)** - Web/HTTP scenario analysis
+- **[Scripts/ValidatePreProvisionedObjects.sql](Scripts/ValidatePreProvisionedObjects.sql)** - Database validation script
+
 ## Related Samples
 
 - **HelloWebAuthSync:** Demonstrates web synchronization with filters and authentication
 - **CustomProvider:** Shows how to create download-only providers
-
-## Future Enhancements (Planned)
-
-- **Phase 3:** Automatic SQL script generation via `GetProvisioningScriptsAsync()`
-- **Phase 4:** Enhanced schema validation for pre-provisioned scenarios
-- **Phase 5:** Migration generation tools and utilities
