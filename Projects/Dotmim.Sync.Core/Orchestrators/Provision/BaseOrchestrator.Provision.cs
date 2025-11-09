@@ -30,6 +30,18 @@ namespace Dotmim.Sync
             if (scopeInfo.Schema == null || scopeInfo.Schema.Tables == null || !scopeInfo.Schema.HasTables)
                 throw new MissingTablesException();
 
+            // Check if provisioning is disabled (for pre-provisioned schemas)
+            if (this.Options.DisableProvisioning)
+            {
+                // Fire provisioning events for consistency and logging
+                await this.InterceptAsync(new ProvisioningArgs(context, provision, scopeInfo, connection, transaction), progress, cancellationToken).ConfigureAwait(false);
+
+                // Assume all objects already exist, skip provisioning
+                await this.InterceptAsync(new ProvisionedArgs(context, provision, scopeInfo, false, connection, transaction), progress, cancellationToken).ConfigureAwait(false);
+
+                return (context, true);
+            }
+
             await this.InterceptAsync(new ProvisioningArgs(context, provision, scopeInfo, connection, transaction), progress, cancellationToken).ConfigureAwait(false);
 
             try
@@ -200,6 +212,18 @@ namespace Dotmim.Sync
                     throw new MissingProviderException(nameof(this.InternalDeprovisionAsync));
 
                 context.SyncStage = SyncStage.Deprovisioning;
+
+                // Check if provisioning is disabled (for pre-provisioned schemas)
+                if (this.Options.DisableProvisioning)
+                {
+                    // Fire deprovisioning events for consistency and logging
+                    await this.InterceptAsync(new DeprovisioningArgs(context, provision, scopeInfo?.Setup, connection, transaction), progress, cancellationToken).ConfigureAwait(false);
+
+                    // Skip deprovisioning since objects are managed externally
+                    await this.InterceptAsync(new DeprovisionedArgs(context, provision, scopeInfo?.Setup, false, connection, transaction), progress, cancellationToken).ConfigureAwait(false);
+
+                    return (context, true);
+                }
 
                 using var runner = await this.GetConnectionAsync(context, SyncMode.WithTransaction, SyncStage.Deprovisioning, connection, transaction, progress, cancellationToken).ConfigureAwait(false);
                 await using (runner.ConfigureAwait(false))

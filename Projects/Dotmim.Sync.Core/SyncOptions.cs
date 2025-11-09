@@ -69,6 +69,18 @@ namespace Dotmim.Sync
         public bool DisableConstraintsOnApplyChanges { get; set; }
 
         /// <summary>
+        /// Gets or sets a value indicating whether provisioning should be disabled.
+        /// When set to true, the orchestrator assumes all database objects (tables, tracking tables,
+        /// triggers, stored procedures) already exist and will skip all provisioning operations.
+        /// This is useful for scenarios where:
+        /// - Database permissions don't allow object creation (no CREATE rights)
+        /// - All schema objects are pre-created through migrations or scripts
+        /// - Client operates with limited permissions restricted to specific schemas
+        /// Default value is false.
+        /// </summary>
+        public bool DisableProvisioning { get; set; }
+
+        /// <summary>
         /// Gets or Sets the scope_info table name. Default is scope_info.
         /// </summary>
         public string ScopeInfoTableName { get; set; }
@@ -116,6 +128,7 @@ namespace Dotmim.Sync
             this.CleanFolder = true;
             this.UseVerboseErrors = true;
             this.DisableConstraintsOnApplyChanges = false;
+            this.DisableProvisioning = false;
             this.ScopeInfoTableName = DefaultScopeInfoTableName;
             this.ConflictResolutionPolicy = ConflictResolutionPolicy.ServerWins;
             this.Logger = new SyncLogger().AddDebug();
