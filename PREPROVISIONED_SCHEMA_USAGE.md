@@ -2,6 +2,12 @@
 
 This document explains how to use Dotmim.Sync with pre-provisioned database objects, useful when database users have limited permissions.
 
+> **📘 Related Documentation:**
+> - [PREPROVISIONED_TECHNICAL_DETAILS.md](PREPROVISIONED_TECHNICAL_DETAILS.md) - Deep dive into how Dotmim.Sync works with existing objects
+> - [Scripts/ValidatePreProvisionedObjects.sql](Scripts/ValidatePreProvisionedObjects.sql) - SQL script to validate all required objects exist
+
+> **⚠️ IMPORTANT:** Dotmim.Sync references database objects by name and does NOT validate they exist before sync. **All required objects must be created via migrations before running the client application**, or sync will fail with SQL exceptions. See technical details document for complete information.
+
 ## Use Case
 
 This feature is designed for scenarios where:
@@ -235,13 +241,37 @@ setup.Tables.Add("Product", "Report");          // Table in "Report" schema
 
 Tracking tables will automatically be created in the same schema as the base tables.
 
+## Validation
+
+Before deploying your client application with `DisableProvisioning = true`, **always validate** that all required objects exist:
+
+```sql
+-- Run the validation script on your client database
+-- See: Scripts/ValidatePreProvisionedObjects.sql
+-- This will check for missing tracking tables, triggers, stored procedures, etc.
+```
+
+The validation script will report:
+- ✅ **CRITICAL** issues that will cause sync to fail immediately
+- ⚠️ **WARNING** issues that may cause problems in certain scenarios
+- ℹ️ **INFORMATIONAL** items with low impact
+
+**Integrate validation into your deployment pipeline:**
+- Run validation after applying migration scripts
+- Fail deployment if critical issues are found
+- Only proceed to production after successful validation
+
 ## Troubleshooting
 
 ### "Object does not exist" errors
 
 **Cause:** The required tracking tables, triggers, or stored procedures are missing.
 
-**Solution:** Ensure all objects are pre-created through migrations before running the client application.
+**Solution:**
+1. Run the validation script: `Scripts/ValidatePreProvisionedObjects.sql`
+2. Identify missing objects from the validation report
+3. Ensure all objects are pre-created through migrations before running the client application
+4. Re-run validation to confirm all objects exist
 
 ### Permission denied errors
 
@@ -269,12 +299,15 @@ Tracking tables will automatically be created in the same schema as the base tab
 
 3. **Client Deployment:**
    - Apply migration scripts to client database
+   - **Run validation script** (`Scripts/ValidatePreProvisionedObjects.sql`)
+   - Fix any missing objects reported by validation
    - Grant minimal permissions to client database user
    - Deploy client application with `DisableProvisioning = true`
 
 4. **Client Runtime:**
    - Application runs synchronization without attempting to create objects
    - All objects are assumed to exist and are used as-is
+   - Sync will fail immediately with SQL exception if any object is missing
 
 ## Benefits
 
@@ -284,11 +317,19 @@ Tracking tables will automatically be created in the same schema as the base tab
 ✅ **Safety:** Prevents accidental schema modifications by client applications
 ✅ **Compatibility:** Works with existing Dotmim.Sync features (filters, web sync, etc.)
 
-## Limitations
+## Limitations and Important Warnings
 
 ⚠️ **Manual Script Generation:** For now, you must manually generate and maintain client migration scripts
 ⚠️ **Schema Synchronization:** You must ensure client schema matches server schema
 ⚠️ **No Auto-Migration:** Schema changes on the server require manual updates to client migration scripts
+⚠️ **No Runtime Validation:** Dotmim.Sync does NOT check if objects exist before sync - it will fail with SQL exceptions
+⚠️ **Critical: Missing Triggers = Silent Data Loss:** If triggers are missing, changes won't be tracked but sync won't fail!
+
+**See [PREPROVISIONED_TECHNICAL_DETAILS.md](PREPROVISIONED_TECHNICAL_DETAILS.md) for:**
+- How Dotmim.Sync references existing objects
+- What checks are performed (and what aren't)
+- Complete list of failure scenarios
+- Detailed validation recommendations
 
 ## Related Samples
 
