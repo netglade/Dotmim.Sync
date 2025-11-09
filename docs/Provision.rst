@@ -244,11 +244,189 @@ Basically ``DroppAllAsync()`` removes barely everything, and will let your datab
     await localOrchestrator.DropAllAsync();
 
 
+Pre-Provisioned Schemas
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+In some scenarios, you may need to work with databases that have restricted permissions where the database user cannot create objects at runtime. This is common in production environments where:
+
+- Database users have limited permissions (SELECT, INSERT, UPDATE, DELETE, EXECUTE, ALTER only - NO CREATE)
+- Database users are restricted to specific schemas
+- All database objects must be created through controlled migration processes
+- Security policies require pre-approved schema changes
+
+For these scenarios, **DMS** provides the ``DisableProvisioning`` option and the ``GetProvisioningScriptsAsync()`` method.
+
+DisableProvisioning Option
+---------------------------
+
+The ``DisableProvisioning`` option in ``SyncOptions`` allows you to skip all provisioning operations, assuming that all required database objects already exist.
+
+.. code-block:: csharp
+
+    var options = new SyncOptions
+    {
+        DisableProvisioning = true
+    };
+
+    var agent = new SyncAgent(clientProvider, serverProvider, options);
+    var result = await agent.SynchronizeAsync(setup);
+
+When ``DisableProvisioning`` is set to ``true``:
+
+- **DMS** will skip creation of tracking tables, triggers, stored procedures, and scope tables
+- **DMS** assumes all required objects already exist in the database
+- The sync process will proceed directly to data synchronization
+- Provisioning and deprovisioning methods will be no-ops
+
+.. warning:: When using ``DisableProvisioning``, you MUST ensure all required objects exist before running sync. Missing triggers will cause **silent data loss** as changes won't be tracked. Missing stored procedures or tracking tables will cause immediate SQL exceptions.
+
+This option works identically for both direct database connections and web/HTTP scenarios.
+
+Web Scenario Example
+____________________
+
+For ASP.NET Core web sync scenarios:
+
+Server-side configuration:
+
+.. code-block:: csharp
+
+    // In Startup.cs or Program.cs
+    services.AddSyncServer<SqlSyncProvider>(
+        connectionString,
+        "MyScope",
+        setup =>
+        {
+            setup.Tables.Add("Product", "SalesLT");
+        },
+        options =>
+        {
+            options.DisableProvisioning = true;
+        }
+    );
+
+Client-side configuration:
+
+.. code-block:: csharp
+
+    var clientProvider = new SqlSyncProvider(clientConnectionString);
+    var proxyClientProvider = new WebRemoteOrchestrator("https://server/api/sync");
+
+    var options = new SyncOptions { DisableProvisioning = true };
+    var agent = new SyncAgent(clientProvider, proxyClientProvider, options);
+
+    var result = await agent.SynchronizeAsync(setup);
+
+Generating Provisioning Scripts
+--------------------------------
+
+To help with pre-provisioned scenarios, **DMS** can automatically generate SQL scripts for all required database objects. These scripts can be integrated into your migration pipeline.
+
+The ``GetProvisioningScriptsAsync()`` method is available on both ``RemoteOrchestrator`` and ``LocalOrchestrator``.
+
+Basic Usage - Server Side
+__________________________
+
+.. code-block:: csharp
+
+    var serverProvider = new SqlSyncProvider(serverConnectionString);
+    var remoteOrchestrator = new RemoteOrchestrator(serverProvider);
+
+    var setup = new SyncSetup("SalesLT.Product", "SalesLT.ProductCategory");
+
+    // Generate scripts for tracking tables, triggers, and stored procedures
+    var scripts = await remoteOrchestrator.GetProvisioningScriptsAsync(
+        setup: setup,
+        provision: SyncProvision.TrackingTable | SyncProvision.Triggers | SyncProvision.StoredProcedures
+    );
+
+    // Save to file
+    await File.WriteAllTextAsync("server_provisioning.sql", scripts);
+
+Basic Usage - Client Side
+__________________________
+
+.. code-block:: csharp
+
+    var clientProvider = new SqlSyncProvider(clientConnectionString);
+    var localOrchestrator = new LocalOrchestrator(clientProvider);
+
+    // Get schema from server first
+    var remoteOrchestrator = new RemoteOrchestrator(serverProvider);
+    var serverScopeInfo = await remoteOrchestrator.GetScopeInfoAsync(setup);
+
+    // Generate client scripts (includes tables, tracking tables, triggers, stored procedures)
+    var scripts = await localOrchestrator.GetProvisioningScriptsAsync(
+        serverScopeInfo: serverScopeInfo,
+        provision: SyncProvision.Table | SyncProvision.TrackingTable |
+                   SyncProvision.Triggers | SyncProvision.StoredProcedures
+    );
+
+    // Save to file
+    await File.WriteAllTextAsync("client_provisioning.sql", scripts);
+
+With Filters
+_____________
+
+Scripts generation fully supports filters, including parameters, WHERE clauses, and JOINs:
+
+.. code-block:: csharp
+
+    var setup = new SyncSetup("SalesLT.Product");
+
+    // Add filter
+    var filter = new SetupFilter("SalesLT.Product");
+    filter.AddParameter("ProductCategoryID", "SalesLT.Product");
+    filter.AddWhere("ProductCategoryID", "SalesLT.Product", "ProductCategoryID");
+    setup.Filters.Add(filter);
+
+    // Generate scripts - stored procedures will include filter parameters
+    var scripts = await remoteOrchestrator.GetProvisioningScriptsAsync(
+        setup: setup,
+        provision: SyncProvision.StoredProcedures
+    );
+
+Save Directly to File
+_____________________
+
+For convenience, you can use ``SaveProvisioningScriptsAsync()`` to save directly:
+
+.. code-block:: csharp
+
+    await remoteOrchestrator.SaveProvisioningScriptsAsync(
+        filePath: "migrations/001_sync_provisioning.sql",
+        setup: setup,
+        provision: SyncProvision.TrackingTable | SyncProvision.Triggers | SyncProvision.StoredProcedures
+    );
+
+The generated scripts include:
+
+- Header comments with metadata (scope name, provision types, generation date)
+- GO statements for proper batch separation
+- Comments indicating table names and object types
+- Properly formatted provider-specific SQL
+
+.. hint:: For complete examples and best practices, see `PREPROVISIONED_SCHEMA_USAGE.md <https://github.com/Mimetis/Dotmim.Sync/blob/master/PREPROVISIONED_SCHEMA_USAGE.md>`_ and `SCRIPT_GENERATION_USAGE.md <https://github.com/Mimetis/Dotmim.Sync/blob/master/SCRIPT_GENERATION_USAGE.md>`_
+
+Validation
+___________
+
+When deploying pre-provisioned objects, it's critical to validate that all required objects exist. **DMS** provides a validation SQL script that can be integrated into your CI/CD pipeline:
+
+.. code-block:: sql
+
+    -- From Scripts/ValidatePreProvisionedObjects.sql
+    -- Checks for tracking tables, triggers, stored procedures
+    -- Returns severity levels: CRITICAL, WARNING, LOW
+    -- Can fail deployment if critical objects are missing
+
+.. warning:: Missing triggers cause **silent data loss** - changes won't be tracked. Always validate triggers are present before running sync with ``DisableProvisioning = true``.
+
 Migrating a database schema
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-| During any dev cycle, you will probably have to make some evolutions on your server database.  
-| Adding or deleting columns will break the sync process.  
+| During any dev cycle, you will probably have to make some evolutions on your server database.
+| Adding or deleting columns will break the sync process.
 | Manually, without the ``ProvisionAsync()`` and ``DeprovisionAsync()`` methods, you will have to edit all the stored procedures, triggers and so on to be able to recreate a full sync processus.  
 
 Before going further, you need to decide:
